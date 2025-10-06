@@ -723,7 +723,7 @@ def help_menu_callback(call):
 @bot.callback_query_handler(func=lambda call: call.data == "back_to_main")
 def back_to_main_callback(call):
     bot.edit_message_text(
-        "🎮 **Steam Rental by Kylichonok**\n\n"
+        "🎮 **Steam Rental by Lini**\n\n"
         "Выберите нужную функцию:",
         chat_id=call.message.chat.id,
         message_id=call.message.message_id,
@@ -1349,7 +1349,7 @@ def start(message):
         set_user_state(message.from_user.id, "waiting_for_secret_phrase", {})
         bot.send_message(
             message.chat.id,
-            "🔐 **Добро пожаловать в Steam Rental by Kylichonok!**\n\n"
+            "🔐 **Добро пожаловать в Steam Rental by Lini!**\n\n"
             "Для доступа к системе введите секретную фразу:",
             parse_mode="Markdown"
         )
@@ -1370,7 +1370,7 @@ def start(message):
         welcome_stats = ""
 
     welcome_message = (
-        "🎮 **Добро пожаловать в Steam Rental by Kylichonok!**\n\n"
+        "🎮 **Добро пожаловать в Steam Rental by Lini!**\n\n"
         "🚀 **Система автоматической аренды Steam аккаунтов**\n\n"
         "✨ **Возможности:**\n"
         "• Автоматическая обработка заказов с FunPay\n"
