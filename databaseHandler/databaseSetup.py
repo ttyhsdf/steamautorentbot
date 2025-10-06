@@ -72,6 +72,9 @@ class SQLiteDB:
         # Миграция для обновления таблицы accounts
         self._migrate_accounts_table(cursor)
         
+        # Создаем таблицы для системы платежей
+        self._create_payment_tables(cursor)
+        
         self.conn.commit()
         cursor.close()
 
@@ -1642,3 +1645,67 @@ class SQLiteDB:
             return False
         finally:
             cursor.close()
+    
+    def _create_payment_tables(self, cursor):
+        """Создает таблицы для системы платежей и подписок."""
+        try:
+            # Таблица балансов пользователей
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS user_balances (
+                    user_id INTEGER PRIMARY KEY,
+                    balance DECIMAL(10, 2) DEFAULT 0.00,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            
+            # Таблица подписок пользователей
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS user_subscriptions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    plan_id TEXT NOT NULL,
+                    subscription_end TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(user_id)
+                )
+                """
+            )
+            
+            # Таблица транзакций
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS payment_transactions (
+                    id TEXT PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    amount DECIMAL(10, 2) NOT NULL,
+                    currency TEXT DEFAULT 'RUB',
+                    payment_method TEXT NOT NULL,
+                    status TEXT DEFAULT 'pending',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    paid_at TIMESTAMP NULL,
+                    description TEXT DEFAULT ''
+                )
+                """
+            )
+            
+            # Таблица настроек платежей
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS payment_settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            
+            logger.info("Payment tables created successfully")
+            
+        except Exception as e:
+            logger.error(f"Error creating payment tables: {str(e)}")
+            self.conn.rollback()
