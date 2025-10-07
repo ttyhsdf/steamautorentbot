@@ -75,6 +75,19 @@ class SQLiteDB:
         # Создаем таблицы для системы платежей
         self._create_payment_tables(cursor)
         
+        # Создаем таблицу для привязки FunPay username к Telegram ID
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS user_bindings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                telegram_id TEXT NOT NULL,
+                funpay_username TEXT NOT NULL,
+                bound_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(telegram_id, funpay_username)
+            )
+            """
+        )
+        
         self.conn.commit()
         cursor.close()
 
