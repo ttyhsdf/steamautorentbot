@@ -385,15 +385,15 @@ def startFunpay():
 
                             for i, account in enumerate(selected_accounts):
                                 try:
-                                    # Set owner and rental start time
-                                    db.set_account_owner(account["id"], event.order.buyer_username)
+                                    # Set owner and rental start time using order_id as renter_id
+                                    db.set_account_owner(account["id"], str(event.order.id))
                                     
                                     # Логируем выдачу аккаунта
-                                    logger.account_assigned(account["id"], event.order.buyer_username, account['account_name'])
+                                    logger.account_assigned(account["id"], str(event.order.id), account['account_name'])
                                     
                                     # Логируем покупку покупателя
                                     db.log_customer_purchase(
-                                        event.order.buyer_username,
+                                        str(event.order.id),
                                         account["id"],
                                         account['account_name'],
                                         account['rental_duration']
@@ -406,6 +406,14 @@ def startFunpay():
                                     except Exception as guard_error:
                                         logger.error(f"Error getting Steam Guard code: {str(guard_error)}")
 
+                                    # Get bot username for message
+                                    try:
+                                        from botHandler.bot import bot
+                                        bot_info = bot.get_me()
+                                        bot_username = bot_info.username
+                                    except:
+                                        bot_username = "steam_rental_bot"
+                                    
                                     # Send complete account data to buyer
                                     message = (
                                         f"🎮 **ДАННЫЕ АККАУНТА STEAM #{i+1}**\n\n"
@@ -425,9 +433,11 @@ def startFunpay():
                                         f"• НЕ добавляйте друзей\n"
                                         f"• НЕ используйте аккаунт для мошенничества\n"
                                         f"• После окончания аренды пароль будет изменен автоматически\n\n"
-                                        f"💡 **Дополнительные команды:**\n"
-                                        f"• `/code` - запросить новый Steam Guard код\n"
-                                        f"• `/question` - задать вопрос\n\n"
+                                        f"🤖 **Telegram бот для управления:**\n"
+                                        f"• Напишите боту: @{bot_username}\n"
+                                        f"• Команда `/code` - получить Steam Guard код\n"
+                                        f"• Команда `/support` - техническая поддержка\n"
+                                        f"• Команда `/time` - проверить оставшееся время\n\n"
                                         f"⭐ **Бонус:** За отзыв получите +{HOURS_FOR_REVIEW} час аренды!\n\n"
                                         f"Удачной игры! 🎯"
                                     )

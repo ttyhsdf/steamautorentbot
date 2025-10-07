@@ -1192,8 +1192,26 @@ def code_command(message):
     username = message.from_user.username or "unknown"
     
     try:
-        # Ищем аккаунты по Telegram ID (после привязки через /bind)
+        # Ищем аккаунты по Telegram ID (если есть привязка через order_id)
         accounts = db_bot.get_user_active_accounts(user_id)
+        
+        # Если не найдено, показываем инструкцию по вводу order_id
+        if not accounts:
+            bot.send_message(
+                message.chat.id,
+                f"🔑 **Steam Guard код**\n\n"
+                f"Для получения Steam Guard кода введите номер заказа из FunPay:\n\n"
+                f"📝 **Формат:** `order:123456789`\n"
+                f"📝 **Пример:** `order:123456789`\n\n"
+                f"💡 **Где найти номер заказа:**\n"
+                f"• В сообщении от продавца в FunPay\n"
+                f"• В истории заказов FunPay\n"
+                f"• В уведомлениях FunPay\n\n"
+                f"🎯 **Или просто напишите номер заказа:** `123456789`",
+                parse_mode="Markdown",
+                reply_markup=get_main_keyboard()
+            )
+            return
         
         # Отладочная информация
         logger.info(f"User {user_id} (@{username}) requested Steam Guard code, found {len(accounts)} accounts")
@@ -1230,9 +1248,9 @@ def code_command(message):
                 f"💡 **Для получения аккаунта:**\n"
                 f"1. Перейдите на FunPay\n"
                 f"2. Совершите покупку\n"
-                f"3. После покупки напишите `/bind <ваш_funpay_username>`\n"
+                f"3. Получите данные аккаунта в FunPay чате\n"
                 f"4. Используйте команду `/code` для получения Steam Guard кода\n\n"
-                f"⚠️ **Важно:** Сначала нужно привязать ваш FunPay аккаунт к Telegram!",
+                f"🎯 **Система работает автоматически!**",
                 parse_mode="Markdown",
                 reply_markup=get_main_keyboard()
             )
@@ -1337,90 +1355,110 @@ def code_command(message):
             parse_mode="Markdown"
         )
 
-@bot.message_handler(commands=["bind"])
-def bind_funpay_command(message):
-    """Команда привязки FunPay username к Telegram ID"""
+@bot.message_handler(func=lambda message: True)
+def handle_order_id(message):
+    """Обработка ввода номера заказа"""
     user_id = str(message.from_user.id)
-    username = message.from_user.username or "unknown"
+    text = message.text.strip()
     
-    # Получаем FunPay username из сообщения
-    try:
-        parts = message.text.split()
-        if len(parts) < 2:
-            bot.send_message(
-                message.chat.id,
-                "❌ **Неверный формат команды**\n\n"
-                "Используйте: `/bind <ваш_funpay_username>`\n\n"
-                "Пример: `/bind myfunpayname`",
-                parse_mode="Markdown"
-            )
-            return
-        
-        funpay_username = parts[1].strip()
-        
-        # Проверяем, есть ли аккаунты с этим FunPay username
-        conn = sqlite3.connect("database.db")
-        cursor = conn.cursor()
-        cursor.execute("SELECT ID, account_name, owner, rental_start, rental_duration FROM accounts WHERE owner = ?", (funpay_username,))
-        accounts = cursor.fetchall()
-        conn.close()
-        
-        if not accounts:
-            bot.send_message(
-                message.chat.id,
-                f"❌ **Аккаунты не найдены**\n\n"
-                f"Для FunPay username `{funpay_username}` не найдено активных аренд.\n\n"
-                f"💡 **Возможные причины:**\n"
-                f"• Неверный FunPay username\n"
-                f"• Покупка еще не обработана\n"
-                f"• Аренда уже завершена\n\n"
-                f"Проверьте правильность username и попробуйте снова.",
-                parse_mode="Markdown"
-            )
-            return
-        
-        # Привязываем аккаунты к Telegram ID
-        conn = sqlite3.connect("database.db")
-        cursor = conn.cursor()
-        
-        # Обновляем владельца с FunPay username на Telegram ID
-        cursor.execute("UPDATE accounts SET owner = ? WHERE owner = ?", (user_id, funpay_username))
-        updated_count = cursor.rowcount
-        
-        # Логируем привязку
-        cursor.execute("INSERT INTO user_bindings (telegram_id, funpay_username, bound_at) VALUES (?, ?, ?)", 
-                      (user_id, funpay_username, datetime.now().isoformat()))
-        
-        conn.commit()
-        conn.close()
-        
-        if updated_count > 0:
-            bot.send_message(
-                message.chat.id,
-                f"✅ **Привязка успешна!**\n\n"
-                f"🔗 **Привязано:** `{funpay_username}` → `{user_id}`\n"
-                f"🎮 **Аккаунтов:** {updated_count}\n\n"
-                f"Теперь вы можете использовать команду `/code` для получения Steam Guard кодов!",
-                parse_mode="Markdown",
-                reply_markup=get_main_keyboard()
-            )
+    # Проверяем, является ли сообщение номером заказа
+    order_id = None
+    if text.isdigit():
+        order_id = text
+    elif text.startswith("order:"):
+        order_id = text[6:].strip()
+    
+    if order_id and order_id.isdigit():
+        try:
+            # Ищем аккаунты по order_id
+            conn = sqlite3.connect("database.db")
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT ID, account_name, login, password, path_to_maFile, rental_start, rental_duration 
+                FROM accounts 
+                WHERE owner = ? AND rental_start IS NOT NULL
+            """, (order_id,))
+            accounts = cursor.fetchall()
+            conn.close()
             
-            logger.info(f"User {user_id} (@{username}) bound to FunPay username {funpay_username}, {updated_count} accounts updated")
-        else:
+            if accounts:
+                # Показываем аккаунты пользователю
+                if len(accounts) == 1:
+                    # Если аккаунт один, сразу генерируем код
+                    account = accounts[0]
+                    account_id = account[0]
+                    account_name = account[1]
+                    
+                    # Получаем Steam Guard код
+                    try:
+                        from steamHandler.auto_guard import get_steam_guard_code
+                        steam_guard_code = get_steam_guard_code(account[4])
+                        
+                        if steam_guard_code:
+                            bot.send_message(
+                                message.chat.id,
+                                f"🔐 **Steam Guard код**\n\n"
+                                f"🎮 **Аккаунт:** {account_name}\n"
+                                f"👤 **Логин:** {account[2]}\n"
+                                f"🔑 **Код:** `{steam_guard_code}`\n\n"
+                                f"⏰ **Код действителен 30 секунд**\n"
+                                f"🔄 **Для нового кода:** `/code`",
+                                parse_mode="Markdown",
+                                reply_markup=get_main_keyboard()
+                            )
+                        else:
+                            bot.send_message(
+                                message.chat.id,
+                                f"❌ **Ошибка генерации кода**\n\n"
+                                f"Не удалось сгенерировать Steam Guard код для {account_name}",
+                                parse_mode="Markdown"
+                            )
+                    except Exception as e:
+                        logger.error(f"Error generating Steam Guard code: {str(e)}")
+                        bot.send_message(
+                            message.chat.id,
+                            f"❌ **Ошибка генерации кода**\n\n{str(e)}",
+                            parse_mode="Markdown"
+                        )
+                else:
+                    # Если несколько аккаунтов, показываем меню выбора
+                    keyboard = InlineKeyboardMarkup()
+                    for account in accounts:
+                        keyboard.add(InlineKeyboardButton(
+                            f"🔑 {account[1]}", 
+                            callback_data=f"get_code_{account[0]}"
+                        ))
+                    keyboard.add(InlineKeyboardButton("⬅️ Назад", callback_data="back_to_main"))
+                    
+                    bot.send_message(
+                        message.chat.id,
+                        f"🔑 **Выберите аккаунт для получения кода:**\n\n"
+                        f"📋 **Найдено аккаунтов:** {len(accounts)}",
+                        parse_mode="Markdown",
+                        reply_markup=keyboard
+                    )
+            else:
+                bot.send_message(
+                    message.chat.id,
+                    f"❌ **Заказ не найден**\n\n"
+                    f"Заказ `{order_id}` не найден или не активен.\n\n"
+                    f"💡 **Проверьте:**\n"
+                    f"• Правильность номера заказа\n"
+                    f"• Активность заказа\n"
+                    f"• Время аренды не истекло",
+                    parse_mode="Markdown"
+                )
+                
+        except Exception as e:
+            logger.error(f"Error handling order ID {order_id}: {str(e)}")
             bot.send_message(
                 message.chat.id,
-                f"❌ **Ошибка привязки**\n\n"
-                f"Не удалось привязать аккаунты для `{funpay_username}`",
+                f"❌ **Ошибка обработки заказа**\n\n{str(e)}",
                 parse_mode="Markdown"
             )
-            
-    except Exception as e:
-        logger.error(f"Error in bind command: {str(e)}")
-        bot.send_message(
-            message.chat.id,
-            f"❌ **Ошибка привязки**\n\n{str(e)}",
-            parse_mode="Markdown"
-        )
+    else:
+        # Если это не номер заказа, игнорируем
+        pass
 
 @bot.message_handler(commands=["start"])
 def start(message):
