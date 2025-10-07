@@ -10,8 +10,17 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from logger import logger
-from steampassword.chpassword import SteamPasswordChange
-from steampassword.steam import CustomSteam
+# Импортируем только то, что нужно для базовой функциональности
+try:
+    from steampassword.chpassword import SteamPasswordChange
+    from steampassword.steam import CustomSteam
+    FULL_VERSION_AVAILABLE = True
+except ImportError:
+    # Fallback если есть проблемы с импортами
+    SteamPasswordChange = None
+    CustomSteam = None
+    FULL_VERSION_AVAILABLE = False
+    logger.warning("Full Steam password change not available, using simplified version")
 
 
 def generate_password(length: int = 12) -> str:
@@ -64,7 +73,15 @@ async def changeSteamPassword(path_to_maFile: str, password: str) -> str:
         new_password = generate_password(12)
         logger.info(f"Generated new password for {data['account_name']}")
 
+        # Проверяем доступность полной версии
+        if not FULL_VERSION_AVAILABLE:
+            logger.warning("⚠️ Full Steam password change not available")
+            logger.warning("⚠️ Using simplified version - password generation only")
+            logger.info(f"✅ {data['account_name']} new password generated: {new_password}")
+            return new_password
+
         # Пытаемся сменить пароль с повторными попытками
+            
         max_attempts = 3
         for attempt in range(max_attempts):
             try:

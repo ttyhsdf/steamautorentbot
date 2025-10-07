@@ -7,9 +7,16 @@ import rsa
 from lxml.html import document_fromstring
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
-from steamlib.api.trade import SteamTrade
-from steamlib.api.trade.exceptions import NotFoundMobileConfirmationError
 from yarl import URL
+
+# Используем правильные импорты из pysteamlib
+try:
+    from pysteamlib.api.trade import SteamTrade
+    from pysteamlib.api.trade.exceptions import NotFoundMobileConfirmationError
+except ImportError:
+    # Fallback для совместимости
+    SteamTrade = None
+    NotFoundMobileConfirmationError = Exception
 
 from pysteamauth.errors import check_steam_error
 from steampassword.exceptions import ErrorSteamPasswordChange
@@ -26,7 +33,11 @@ class SteamPasswordChange:
 
     def __init__(self, steam: CustomSteam):
         self._steam = steam
-        self._steam_trade = SteamTrade(steam)
+        # Инициализируем SteamTrade только если библиотека доступна
+        if SteamTrade is not None:
+            self._steam_trade = SteamTrade(steam)
+        else:
+            self._steam_trade = None
 
     async def _receive_password_change_params(self) -> PasswordChangeParams:
         response = await self._steam.raw_request(
@@ -311,18 +322,18 @@ class SteamPasswordChange:
         await self._login_info_enter_code(params)
 
         # Confirm password change in mobile app
-        for _ in range(3):
-            try:
-
-                success = await self._steam_trade.mobile_confirm_by_creator_id(params.s)
-                if not success:
+        if self._steam_trade is not None:
+            for _ in range(3):
+                try:
+                    success = await self._steam_trade.mobile_confirm_by_creator_id(params.s)
+                    if not success:
+                        raise ErrorSteamPasswordChange("Error password change confirmation")
+                    break
+                except NotFoundMobileConfirmationError:
+                    await asyncio.sleep(2)
+                except Exception as e:
+                    print(f"Error: {e}")
                     raise ErrorSteamPasswordChange("Error password change confirmation")
-                break
-            except NotFoundMobileConfirmationError:
-                await asyncio.sleep(2)
-            except Exception as e:
-                print.error(e)
-                raise ErrorSteamPasswordChange("Error password change confirmation")
         else:
             raise NotFoundMobileConfirmationError("Not found mobile confirmation")
 
