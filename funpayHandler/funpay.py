@@ -115,6 +115,110 @@ def send_daily_report():
     except Exception as e:
         logger.error(f"Error sending daily report: {str(e)}")
 
+def process_new_feedback(event):
+    """Обработка нового отзыва"""
+    try:
+        from messaging.message_templates import get_message_template
+        
+        feedback = event.feedback
+        reviewer_username = feedback.author
+        
+        logger.info(f"Processing new feedback from {reviewer_username}")
+        
+        # Проверяем, есть ли активная аренда у этого пользователя
+        conn = sqlite3.connect("database.db")
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT ID, account_name, rental_start, rental_duration 
+            FROM accounts 
+            WHERE owner = ? AND rental_start IS NOT NULL
+            ORDER BY rental_start DESC 
+            LIMIT 1
+        """, (reviewer_username,))
+        
+        result = cursor.fetchone()
+        
+        if result:
+            account_id, account_name, rental_start, rental_duration = result
+            
+            # Добавляем бонусное время
+            success = db.add_time_to_owner_accounts(reviewer_username, HOURS_FOR_REVIEW)
+            
+            if success:
+                # Отправляем уведомление пользователю
+                user_message = get_message_template("bonus_activated",
+                    bonus_hours=HOURS_FOR_REVIEW,
+                    bonus_time=f"+{HOURS_FOR_REVIEW} часов"
+                )
+                
+                send_message_by_owner(reviewer_username, user_message)
+                
+                # Уведомляем администратора
+                admin_message = f"🎉 **БОНУС ЗА ОТЗЫВ!**\n\n👤 **Пользователь:** {reviewer_username}\n🎯 **Аккаунт:** {account_name}\n⏱ **Бонус:** +{HOURS_FOR_REVIEW} часов"
+                
+                send_message_by_owner("admin", admin_message)
+                
+                logger.info(f"Bonus time added for {reviewer_username}")
+            else:
+                logger.warning(f"Failed to add bonus time for {reviewer_username}")
+        else:
+            logger.info(f"No active rental found for reviewer {reviewer_username}")
+        
+        cursor.close()
+        conn.close()
+        
+    except Exception as e:
+        logger.error(f"Error processing new feedback: {str(e)}")
+
+def process_feedback_deleted(event):
+    """Обработка удаления отзыва"""
+    try:
+        from messaging.message_templates import get_message_template
+        
+        feedback = event.feedback
+        reviewer_username = feedback.author
+        
+        logger.info(f"Processing feedback deletion from {reviewer_username}")
+        
+        # Отменяем бонусное время
+        conn = sqlite3.connect("database.db")
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT ID, account_name, rental_start, rental_duration 
+            FROM accounts 
+            WHERE owner = ? AND rental_start IS NOT NULL
+            ORDER BY rental_start DESC 
+            LIMIT 1
+        """, (reviewer_username,))
+        
+        result = cursor.fetchone()
+        
+        if result:
+            account_id, account_name, rental_start, rental_duration = result
+            
+            # Отменяем бонусное время
+            success = db.add_time_to_owner_accounts(reviewer_username, -HOURS_FOR_REVIEW)
+            
+            if success:
+                # Уведомляем администратора
+                admin_message = f"🗑️ **Отзыв удален!**\n\n👤 **Пользователь:** {reviewer_username}\n🎯 **Аккаунт:** {account_name}\n⏱ **Отменено бонусное время:** -{HOURS_FOR_REVIEW} час"
+                
+                send_message_by_owner("admin", admin_message)
+                
+                logger.info(f"Bonus time cancelled for {reviewer_username}")
+            else:
+                logger.warning(f"Failed to cancel bonus time for {reviewer_username}")
+        else:
+            logger.info(f"No active rental found for reviewer {reviewer_username}")
+        
+        cursor.close()
+        conn.close()
+        
+    except Exception as e:
+        logger.error(f"Error processing feedback deletion: {str(e)}")
+
 def schedule_daily_reports():
     """Планировщик ежедневных отчетов"""
     import schedule
@@ -304,6 +408,8 @@ def startFunpay():
         daily_report_thread = threading.Thread(target=schedule_daily_reports, daemon=True)
         daily_report_thread.start()
 
+        # Система автоматических ответов отключена - не нужна ChromeDriver
+
         logger.info("FunPay bot started successfully. Listening for events...")
 
         for event in runner.listen(requests_delay=8):
@@ -414,32 +520,18 @@ def startFunpay():
                                     except:
                                         bot_username = "steam_rental_bot"
                                     
-                                    # Send complete account data to buyer
-                                    message = (
-                                        f"🎮 **ДАННЫЕ АККАУНТА STEAM #{i+1}**\n\n"
-                                        f"👤 **Логин:** `{account['login']}`\n"
-                                        f"🔑 **Пароль:** `{account['password']}`\n"
-                                        f"📝 **Название:** `{account['account_name']}`\n"
-                                        f"⏱ **Срок аренды:** {account['rental_duration']} часов\n"
-                                        f"📅 **Начало аренды:** {datetime.now(moscow_tz).strftime('%d.%m.%Y %H:%M')}\n\n"
-                                    )
+                                    # Send complete account data to buyer using template
+                                    from messaging.message_templates import get_message_template
                                     
-                                    if steam_guard_code:
-                                        message += f"🔐 **Steam Guard код:** `{steam_guard_code}`\n\n"
-                                    
-                                    message += (
-                                        f"⚠️ **ВАЖНЫЕ ПРАВИЛА:**\n"
-                                        f"• НЕ меняйте пароль от аккаунта\n"
-                                        f"• НЕ добавляйте друзей\n"
-                                        f"• НЕ используйте аккаунт для мошенничества\n"
-                                        f"• После окончания аренды пароль будет изменен автоматически\n\n"
-                                        f"🤖 **Telegram бот для управления:**\n"
-                                        f"• Напишите боту: @{bot_username}\n"
-                                        f"• Команда `/code` - получить Steam Guard код\n"
-                                        f"• Команда `/support` - техническая поддержка\n"
-                                        f"• Команда `/time` - проверить оставшееся время\n\n"
-                                        f"⭐ **Бонус:** За отзыв получите +{HOURS_FOR_REVIEW} час аренды!\n\n"
-                                        f"Удачной игры! 🎯"
+                                    message = get_message_template("order_data", 
+                                        account_number=i+1,
+                                        login=account['login'],
+                                        password=account['password'],
+                                        account_name=account['account_name'],
+                                        rental_duration=account['rental_duration'],
+                                        start_time=datetime.now(moscow_tz).strftime('%d.%m.%Y %H:%M'),
+                                        steam_guard_code=steam_guard_code or "Недоступен",
+                                        bonus_hours=HOURS_FOR_REVIEW
                                     )
 
                                     send_message_by_owner(event.order.buyer_username, message)
@@ -853,86 +945,13 @@ def startFunpay():
                         except:
                             pass
                 
+                elif hasattr(events.EventTypes, 'NEW_FEEDBACK') and event.type is events.EventTypes.NEW_FEEDBACK:
+                    logger.info(f"New feedback from {event.feedback.author}")
+                    process_new_feedback(event)
+                    
                 elif hasattr(events.EventTypes, 'FEEDBACK_DELETED') and event.type is events.EventTypes.FEEDBACK_DELETED:
                     logger.info(f"Feedback deleted by {event.feedback.author}")
-                    # Отзыв удален - отменяем бонусное время
-                    
-                    try:
-                        reviewer_username = event.feedback.author
-                        
-                        # Ищем активную аренду для этого пользователя
-                        cursor = db.conn.cursor()
-                        cursor.execute(
-                            """
-                            SELECT id, account_name, rental_duration, rental_start
-                            FROM accounts 
-                            WHERE owner = ? AND rental_start IS NOT NULL
-                            ORDER BY rental_start DESC
-                            LIMIT 1
-                            """,
-                            (reviewer_username,)
-                        )
-                        
-                        active_rental = cursor.fetchone()
-                        
-                        if active_rental:
-                            account_id, account_name, current_duration, rental_start = active_rental
-                            
-                            # Уменьшаем аренду на HOURS_FOR_REVIEW часов (отменяем бонус)
-                            success = db.extend_rental_duration(account_id, -HOURS_FOR_REVIEW)
-                            
-                            if success:
-                                # Получаем обновленную информацию об аккаунте
-                                cursor.execute(
-                                    "SELECT rental_duration FROM accounts WHERE id = ?",
-                                    (account_id,)
-                                )
-                                new_duration = cursor.fetchone()[0]
-                                
-                                # Отправляем уведомление пользователю
-                                message = (
-                                    f"⚠️ **Отзыв удален**\n\n"
-                                    f"❌ **Бонусное время отменено (-{HOURS_FOR_REVIEW} час)**\n\n"
-                                    f"📝 **Аккаунт:** {account_name}\n"
-                                    f"⏱ **Новый срок аренды:** {new_duration} часов\n\n"
-                                    f"💡 **Примечание:** Бонусное время предоставляется только за активные отзывы"
-                                )
-                                
-                                send_message_by_owner(reviewer_username, message)
-                                
-                                logger.info(f"Bonus time cancelled for {reviewer_username} (-{HOURS_FOR_REVIEW} hours)", 
-                                          extra_info=f"Account: {account_name}, New duration: {new_duration}")
-                                
-                                # Уведомляем администратора
-                                admin_message = (
-                                    f"🗑️ **Отзыв удален!**\n\n"
-                                    f"👤 **Пользователь:** {reviewer_username}\n"
-                                    f"🎯 **Аккаунт:** {account_name}\n"
-                                    f"⏱ **Отменено бонусное время:** -{HOURS_FOR_REVIEW} час\n"
-                                    f"📊 **Новый срок:** {new_duration} часов"
-                                )
-                                
-                                send_message_by_owner("admin", admin_message)
-                                
-                            else:
-                                logger.warning(f"Failed to cancel bonus time for {reviewer_username}")
-                        else:
-                            logger.info(f"No active rental found for reviewer {reviewer_username}")
-                        
-                        cursor.close()
-                        
-                    except Exception as e:
-                        logger.error(f"Error processing feedback deletion: {str(e)}")
-                        # Отправляем уведомление об ошибке администратору
-                        try:
-                            send_message_by_owner(
-                                "admin",
-                                f"❌ **Ошибка обработки удаления отзыва**\n\n"
-                                f"**Автор:** {event.feedback.author}\n"
-                                f"**Ошибка:** {str(e)}"
-                            )
-                        except:
-                            pass
+                    process_feedback_deleted(event)
                     
                 else:
                     # Неизвестный или необрабатываемый тип события
