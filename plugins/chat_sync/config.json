@@ -1,0 +1,14 @@
+{
+  "chat_id": null,
+  "watermark_is_hidden": false,
+  "image_name": true,
+  "mono": false,
+  "buyer_viewing": true,
+  "edit_topic": true,
+  "templates": false,
+  "self_notify": true,
+  "auto_sync_accounts": true,
+  "sync_rental_status": true,
+  "notify_on_rental_change": true,
+  "funpay_only_mode": true
+}
